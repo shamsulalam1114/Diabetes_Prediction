@@ -141,9 +141,9 @@ st.markdown(
 )
 
 # --- App Layout ---
-st.title("🩺 DiaPredict AI")
+st.title("🩺 DiaPredict AI: Diabetes Prediction System")
 st.markdown(
-    "<h4 style='text-align: center; color: #5a5a5a;'>Your AI-powered assistant for diabetes risk assessment.</h4>",
+    "<h4 style='text-align: center; color: #5a5a5a;'>AI-powered assistant for diabetes risk assessment.</h4>",
     unsafe_allow_html=True)
 st.markdown("---")
 
