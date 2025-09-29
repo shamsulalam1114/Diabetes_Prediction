@@ -29,9 +29,12 @@ def create_pdf_report(patient_data, prediction_result, confidence):
 
     pdf.set_font("Arial", '', 12)
     for key, value in patient_data.items():
-        pdf.cell(95, 10, f"{key.replace('_', ' ').title()}:", 0, 0)
+        # Ensure the key is a string before attempting to use .replace()
+        display_key = str(key).replace('_', ' ').title()
+        pdf.cell(95, 10, f"{display_key}:", 0, 0)
         pdf.cell(95, 10, str(value), 0, 1)
     pdf.ln(10)
+
 
     # Prediction Result Section
     pdf.set_font("Arial", 'B', 16)
@@ -70,9 +73,13 @@ try:
 except FileNotFoundError:
     st.error("Error: The model file 'best_global_stacking_model.pkl' was not found.")
     st.stop()
+except Exception as e:
+    st.error(f"An error occurred while loading the model: {e}")
+    st.stop
+
 
 # --- Page Config & Styling ---
-st.set_page_config(page_title="Diabetes Prediction", layout="wide")
+st.set_page_config(page_title="DiaPredict AI", layout="wide")
 
 # THIS IS THE NEW, MORE ROBUST CSS SECTION
 st.markdown(
@@ -134,9 +141,9 @@ st.markdown(
 )
 
 # --- App Layout ---
-st.title("🩺 Diabetes Prediction System")
+st.title("🩺 DiaPredict AI")
 st.markdown(
-    "<h4 style='text-align: center; color: #5a5a5a;'>Provide the patient's details to predict the likelihood of diabetes.</h4>",
+    "<h4 style='text-align: center; color: #5a5a5a;'>Your AI-powered assistant for diabetes risk assessment.</h4>",
     unsafe_allow_html=True)
 st.markdown("---")
 
@@ -154,6 +161,7 @@ with center_col:
                 systolic_bp = st.number_input("Systolic BP (mmHg)", min_value=80, max_value=250, value=120)
                 diastolic_bp = st.number_input("Diastolic BP (mmHg)", min_value=50, max_value=150, value=80)
                 glucose = st.number_input("Glucose Level (mg/dL)", min_value=50, max_value=500, value=100)
+
             with col2:
                 height = st.number_input("Height (cm)", min_value=100, max_value=250, value=170)
                 weight = st.number_input("Weight (kg)", min_value=30, max_value=200, value=70)
@@ -161,41 +169,65 @@ with center_col:
                                       format="%.2f", help="Calculated as weight (kg) / [height (m)]^2")
                 hypertensive = st.selectbox("Patient is Hypertensive?", [0, 1],
                                             format_func=lambda x: "Yes" if x == 1 else "No")
+                diagnostic_label = st.selectbox("Diagnostic Label", [0, 1, 2],
+                                             format_func=lambda x: {0: 'Normal', 1: 'Prediabetes', 2: 'Diabetes'}.get(x))
+
             submitted = st.form_submit_button("Submit for Prediction")
 
     # --- Prediction and Report Display ---
     st.markdown("---")
 
     if submitted:
+        # This dictionary should only contain features the model was trained on
         input_data_dict = {
             'age': age, 'pulse_rate': pulse_rate, 'systolic_bp': systolic_bp,
             'diastolic_bp': diastolic_bp, 'glucose': glucose, 'height': height,
-            'weight': weight, 'bmi': bmi, 'hypertensive': hypertensive
+            'weight': weight, 'bmi': bmi, 'hypertensive': hypertensive,
+            'diagnostic_label': diagnostic_label
         }
-        input_data_df = pd.DataFrame([list(input_data_dict.values()) + [0]],
-                                     columns=list(input_data_dict.keys()) + ['diagnostic_label'])
-        prediction = model.predict(input_data_df)[0]
-        proba = model.predict_proba(input_data_df)[0][1] if hasattr(model, "predict_proba") else None
 
-        with st.container(border=True):
-            st.subheader("Prediction Outcome")
-            if prediction == 1:
-                st.error("Result: High Likelihood of Diabetes", icon="⚠️")
-                confidence_score = f"{proba:.2%}" if proba is not None else "N/A"
-                prediction_text = "Positive"
+        # Convert to DataFrame for the model
+        input_df = pd.DataFrame([input_data_dict])
+
+
+        # Make prediction
+        try:
+            prediction = model.predict(input_df)[0]
+            # Check for predict_proba and get probabilities
+            if hasattr(model, "predict_proba"):
+                proba = model.predict_proba(input_df)[0]
+                # Assuming class 1 is the positive class
+                positive_class_proba = proba[1]
             else:
-                st.success("Result: Low Likelihood of Diabetes", icon="✅")
-                confidence_score = f"{1 - proba:.2%}" if proba is not None else "N/A"
-                prediction_text = "Negative"
+                positive_class_proba = None
 
-            st.metric(label="Prediction Confidence", value=confidence_score)
-            st.caption("This confidence score represents the model's certainty in its prediction.")
-            pdf_bytes = create_pdf_report(input_data_dict, prediction_text, confidence_score)
-            st.download_button(
-                label="📥 Download Report (PDF)",
-                data=pdf_bytes,
-                file_name=f"diabetes_report_{datetime.now().strftime('%Y%m%d')}.pdf",
-                mime="application/pdf",
-            )
+            with st.container(border=True):
+                st.subheader("Prediction Outcome")
+                if prediction == 1:
+                    st.error("Result: High Likelihood of Diabetes", icon="⚠️")
+                    confidence_score = f"{positive_class_proba:.2%}" if positive_class_proba is not None else "N/A"
+                    prediction_text = "Positive"
+                else:
+                    st.success("Result: Low Likelihood of Diabetes", icon="✅")
+                    # For negative, confidence is in the other class
+                    confidence_score = f"{1 - positive_class_proba:.2%}" if positive_class_proba is not None else "N/A"
+                    prediction_text = "Negative"
+
+                st.metric(label="Prediction Confidence", value=confidence_score)
+                st.caption("This confidence score represents the model's certainty in its prediction.")
+
+                # Generate and offer the PDF for download
+                pdf_bytes = create_pdf_report(input_data_dict, prediction_text, confidence_score)
+                st.download_button(
+                    label="📥 Download Report (PDF)",
+                    data=pdf_bytes,
+                    file_name=f"diabetes_report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                )
+
+        except Exception as e:
+            st.error(f"An error occurred during prediction: {e}")
+
+
     else:
         st.info("The prediction result will be displayed here after you submit the patient's data.")
